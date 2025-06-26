@@ -1,0 +1,392 @@
+using Npgsql;
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace demoex
+{
+    public partial class Form5 : Form
+    {
+        private string connectionString = "Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=demo";
+        private Panel scrollablePanel;
+
+        public Form5()
+        {
+            InitializeComponent();
+            InitializeControls();
+            LoadProductData();
+            this.Size = new Size(1000, 600);
+            this.Text = "Список продуктов";
+        }
+
+        private void InitializeControls()
+        {
+            // Main panel with scroll
+            scrollablePanel = new Panel
+            {
+                AutoScroll = true,
+                Location = new Point(10, 50),
+                Size = new Size(980, 500),
+                BorderStyle = BorderStyle.None
+            };
+
+            // Back button
+            Button backButton = new Button
+            {
+                Text = "Назад",
+                Location = new Point(10, 10),
+                Size = new Size(100, 30)
+            };
+            backButton.Click += (s, e) => { Form1 form1 = new Form1(); form1.Show(); this.Hide(); };
+
+            // Header label
+            Label headerLabel = new Label
+            {
+                Text = "Список продуктов",
+                Font = new Font("Arial", 16, FontStyle.Bold),
+                Location = new Point(120, 10),
+                AutoSize = true
+            };
+
+            this.Controls.Add(backButton);
+            this.Controls.Add(headerLabel);
+            this.Controls.Add(scrollablePanel);
+        }
+
+        private void LoadProductData()
+        {
+            scrollablePanel.Controls.Clear();
+
+            try
+            {
+                using (NpgsqlConnection connection = new NpgsqlConnection(connectionString))
+                {
+                    connection.Open();
+                    string query = @"
+                        SELECT 
+                            pi.id,
+                            tp.tip_produkcii AS product_type,
+                            np.naim_product AS product_name,
+                            pi.articul AS article,
+                            pi.min_stoim AS min_price,
+                            b.tip_mater AS material_type,
+                            b.procent_braka AS defect_percentage,
+                            ptk.koef_tipa AS type_coefficient
+                        FROM 
+                            public.products_import pi
+                        JOIN 
+                            public.tip_produc tp ON pi.tip_produc = tp.id
+                        JOIN 
+                            public.naimen_produc np ON pi.""Naimenov_produc"" = np.id
+                        JOIN 
+                            public.brak b ON pi.material_brak = b.id
+                        LEFT JOIN
+                            public.prod_type_koef ptk ON pi.tip_produc = ptk.tip_prod
+                        ORDER BY 
+                            tp.tip_produkcii, np.naim_product";
+
+                    using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                    {
+                        using (NpgsqlDataReader reader = command.ExecuteReader())
+                        {
+                            int xPosition = 10;
+                            int yPosition = 10;
+                            int blockWidth = 450;
+                            int blockHeight = 180;
+                            int blocksPerRow = 2;
+
+                            while (reader.Read())
+                            {
+                                Panel productPanel = CreateProductBlock(reader, blockWidth, blockHeight);
+                                productPanel.Location = new Point(xPosition, yPosition);
+                                scrollablePanel.Controls.Add(productPanel);
+// Update positions for next block
+                                if (blocksPerRow > 1)
+                                {
+                                    xPosition += blockWidth + 10;
+                                    if (xPosition + blockWidth > scrollablePanel.Width)
+                                    {
+                                        xPosition = 10;
+                                        yPosition += blockHeight + 10;
+                                    }
+                                }
+                                else
+                                {
+                                    yPosition += blockHeight + 10;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки данных продуктов: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private Panel CreateProductBlock(NpgsqlDataReader reader, int width, int height)
+        {
+            Panel panel = new Panel
+            {
+                Size = new Size(width, height),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White
+            };
+
+            // Product Type and Name
+            Label typeLabel = new Label
+            {
+                Text = $"{reader["product_type"]}",
+                Location = new Point(10, 10),
+                Font = new Font("Arial", 12, FontStyle.Bold),
+                AutoSize = true
+            };
+
+            Label nameLabel = new Label
+            {
+                Text = $"{reader["product_name"]}",
+                Location = new Point(10, 35),
+                Font = new Font("Arial", 10),
+                AutoSize = true
+            };
+
+            // Article and Price
+            Label articleLabel = new Label
+            {
+                Text = $"Артикул: {reader["article"]}",
+                Location = new Point(10, 60),
+                Font = new Font("Arial", 9),
+                AutoSize = true
+            };
+
+            Label priceLabel = new Label
+            {
+                Text = $"Мин. цена: {reader["min_price"]} руб.",
+                Location = new Point(10, 80),
+                Font = new Font("Arial", 9),
+                AutoSize = true
+            };
+
+            // Material Info
+            Label materialLabel = new Label
+            {
+                Text = $"Материал: {reader["material_type"]}",
+                Location = new Point(10, 100),
+                Font = new Font("Arial", 9),
+                AutoSize = true
+            };
+
+            Label defectLabel = new Label
+            {
+                Text = $"Брак: {reader["defect_percentage"]}",
+                Location = new Point(10, 120),
+                Font = new Font("Arial", 9),
+                AutoSize = true
+            };
+
+            // Coefficient
+            Label coeffLabel = new Label
+            {
+                Text = $"Коэффициент: {reader["type_coefficient"] ?? "N/A"}",
+                Location = new Point(250, 10),
+                Font = new Font("Arial", 9, FontStyle.Bold),
+                AutoSize = true
+            };
+
+            // Calculate Material button
+            Button calcButton = new Button
+            {
+                Text = "Расчет материала",
+                Tag = reader["id"],
+                Location = new Point(250, 40),
+                Size = new Size(150, 30)
+            };
+            calcButton.Click += CalculateMaterialButton_Click;
+
+            // Edit button
+            Button editButton = new Button
+            {
+                Text = "Редактировать",
+                Tag = reader["id"],
+                Location = new Point(250, 80),
+                Size = new Size(150, 30)
+            };
+            editButton.Click += EditProductButton_Click;
+// Sales History button
+            Button salesButton = new Button
+            {
+                Text = "История продаж",
+                Tag = reader["id"],
+                Location = new Point(250, 120),
+                Size = new Size(150, 30)
+            };
+            salesButton.Click += ProductSalesHistoryButton_Click;
+
+            panel.Controls.Add(typeLabel);
+            panel.Controls.Add(nameLabel);
+            panel.Controls.Add(articleLabel);
+            panel.Controls.Add(priceLabel);
+            panel.Controls.Add(materialLabel);
+            panel.Controls.Add(defectLabel);
+            panel.Controls.Add(coeffLabel);
+            panel.Controls.Add(calcButton);
+            panel.Controls.Add(editButton);
+            panel.Controls.Add(salesButton);
+
+            return panel;
+        }
+
+        private void CalculateMaterialButton_Click(object sender, EventArgs e)
+        {
+            Button button = sender as Button;
+            int productId = Convert.ToInt32(button.Tag);
+
+            // Create a dialog for material calculation parameters
+            Form materialCalcForm = new Form
+            {
+                Text = "Расчет необходимого материала",
+                Size = new Size(400, 300),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog
+            };
+
+            // Add input controls
+            Label param1Label = new Label { Text = "Параметр 1:", Location = new Point(20, 20), AutoSize = true };
+            NumericUpDown param1Input = new NumericUpDown { Location = new Point(150, 20), Width = 200 };
+
+            Label param2Label = new Label { Text = "Параметр 2:", Location = new Point(20, 60), AutoSize = true };
+            NumericUpDown param2Input = new NumericUpDown { Location = new Point(150, 60), Width = 200 };
+
+            Label quantityLabel = new Label { Text = "Количество:", Location = new Point(20, 100), AutoSize = true };
+            NumericUpDown quantityInput = new NumericUpDown { Location = new Point(150, 100), Width = 200, Minimum = 1 };
+
+            Button calculateButton = new Button { Text = "Рассчитать", Location = new Point(150, 150), Size = new Size(100, 30) };
+            Label resultLabel = new Label { Location = new Point(20, 200), AutoSize = true };
+
+            calculateButton.Click += (s, args) =>
+            {
+                try
+                {
+                    // Get product data
+                    using (NpgsqlConnection connection = new NpgsqlConnection(connectionString))
+                    {
+                        connection.Open();
+                        string query = @"
+                            SELECT 
+                                pi.tip_produc,
+                                b.tip_mater
+                            FROM 
+                                public.products_import pi
+                            JOIN 
+                                public.brak b ON pi.material_brak = b.id
+                            WHERE 
+                                pi.id = @productId";
+
+                        using (NpgsqlCommand command = new NpgsqlCommand(query, connection))
+                        {
+                            command.Parameters.AddWithValue("@productId", productId);
+                            using (NpgsqlDataReader reader = command.ExecuteReader())
+                            {
+                                if (reader.Read())
+                                {
+                                    int prodTypeId = Convert.ToInt32(reader["tip_produc"]);
+                                    string materialType = reader["tip_mater"].ToString();
+                                    int quantity = (int)quantityInput.Value;
+                                    double param1 = (double)param1Input.Value;
+                                    double param2 = (double)param2Input.Value;
+int materialRequired = CalculateMaterial(prodTypeId, materialType, quantity, param1, param2);
+                                    resultLabel.Text = $"Необходимый материал: {materialRequired}";
+                                    resultLabel.ForeColor = Color.Green;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    resultLabel.Text = $"Ошибка: {ex.Message}";
+                    resultLabel.ForeColor = Color.Red;
+                }
+            };
+
+            materialCalcForm.Controls.Add(param1Label);
+            materialCalcForm.Controls.Add(param1Input);
+            materialCalcForm.Controls.Add(param2Label);
+            materialCalcForm.Controls.Add(param2Input);
+            materialCalcForm.Controls.Add(quantityLabel);
+            materialCalcForm.Controls.Add(quantityInput);
+            materialCalcForm.Controls.Add(calculateButton);
+            materialCalcForm.Controls.Add(resultLabel);
+
+            materialCalcForm.ShowDialog();
+        }
+
+        private int CalculateMaterial(int prodTypeId, string materialType, int productCount, double param1, double param2)
+        {
+            if (productCount <= 0  param1 <= 0  param2 <= 0)
+            {
+                return -1; // Invalid input
+            }
+
+            try
+            {
+                double koefTipa = 1.0;
+                double procentBraka = 0.0;
+
+                using (NpgsqlConnection connection = new NpgsqlConnection(connectionString))
+                {
+                    connection.Open();
+
+                    // Get type coefficient
+                    string koefQuery = "SELECT koef_tipa FROM public.prod_type_koef WHERE tip_prod = @prodTypeId";
+                    using (NpgsqlCommand koefCommand = new NpgsqlCommand(koefQuery, connection))
+                    {
+                        koefCommand.Parameters.AddWithValue("@prodTypeId", prodTypeId);
+                        object result = koefCommand.ExecuteScalar();
+                        if (result != null)
+                        {
+                            koefTipa = Convert.ToDouble(result);
+                        }
+                    }
+
+                    // Get defect percentage
+                    string brakQuery = "SELECT procent_braka FROM public.brak WHERE tip_mater = @materialType";
+                    using (NpgsqlCommand brakCommand = new NpgsqlCommand(brakQuery, connection))
+                    {
+                        brakCommand.Parameters.AddWithValue("@materialType", materialType);
+                        object result = brakCommand.ExecuteScalar();
+                        if (result != null)
+                        {
+                            string procentStr = result.ToString().Replace("%", "").Replace(",", ".");
+                            procentBraka = Convert.ToDouble(procentStr);
+                        }
+                    }
+                }
+
+                // Calculate required material
+                double requiredMaterial = (param1 * param2 * koefTipa * productCount) * (1 + procentBraka / 100);
+                return (int)Math.Ceiling(requiredMaterial);
+            }
+            catch (Exception)
+            {
+                return -1; // Error in calculation
+            }
+        }
+
+        private void EditProductButton_Click(object sender, EventArgs e)
+        {
+            Button button = sender as Button;
+            int productId = Convert.ToInt32(button.Tag);
+            MessageBox.Show($"Редактирование продукта с ID: {productId}", "Редактирование", MessageBoxButtons.OK);
+            // Here you would typically open a product editing form
+        }
+private void ProductSalesHistoryButton_Click(object sender, EventArgs e)
+        {
+            Button button = sender as Button;
+            int productId = Convert.ToInt32(button.Tag);
+            MessageBox.Show($"История продаж продукта с ID: {productId}", "История продаж", MessageBoxButtons.OK);
+            // Here you would typically open a sales history form for this product
+        }
+    }
+}
